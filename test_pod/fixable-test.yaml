@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-typo-deploy
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx-typo
+  template:
+    metadata:
+      labels:
+        app: nginx-typo
+    spec:
+      containers:
+      - name: nginx-container
+        image: nginx:typov1
+        imagePullPolicy: Always
