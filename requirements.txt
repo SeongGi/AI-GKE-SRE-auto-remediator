@@ -1,0 +1,5 @@
+kubernetes>=28.1.0
+google-cloud-aiplatform>=1.38.0
+google-generativeai>=0.3.0
+google-auth>=2.0.0
+slack_bolt>=1.18.0
