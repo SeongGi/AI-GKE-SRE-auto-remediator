@@ -1,0 +1,146 @@
+# 1. 테스트 스크립트를 담은 ConfigMap
+# (별도의 이미지 빌드 없이 파이썬 코드를 실행하기 위함)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: test-scripts-config
+  namespace: default
+data:
+  # Scenario 1: 메모리 누수 스크립트
+  oom.py: |
+    import time
+    import os
+    print("⇨ [OOM App] Starting memory leak simulation...")
+    data = []
+    try:
+        while True:
+            # 10MB씩 메모리에 계속 추가
+            data.append(' ' * 10 * 1024 * 1024)
+            print(f"⇨ [OOM App] Allocated {len(data) * 10} MB")
+            time.sleep(1)
+    except MemoryError:
+        print("⇨ [OOM App] Memory Error caught!")
+
+  # Scenario 2: 코드 로직 에러 (Panic) 스크립트
+  panic.py: |
+    import time
+    print("⇨ [Panic App] Service starting...")
+    time.sleep(5)
+    print("⇨ [Panic App] Critical logic error occurred!")
+    # 강제로 런타임 에러 발생
+    raise RuntimeError("CRITICAL_FAILURE: Unhandled exception in main thread.")
+
+  # Scenario 3: 환경 변수 체크 스크립트
+  env_check.py: |
+    import os
+    import time
+    import sys
+
+    print("⇨ [Env App] Checking configuration...")
+    required_env = "DB_URL"
+    
+    if required_env not in os.environ:
+        print(f"⇨ [Env App] Error: Missing required environment variable '{required_env}'")
+        # 환경변수가 없으면 비정상 종료 (CrashLoopBackOff 유발)
+        sys.exit(1)
+    
+    print(f"⇨ [Env App] Connection successful to {os.environ[required_env]}")
+    while True:
+        time.sleep(3600)
+
+---
+# 2. Scenario 1: OOM App (메모리 부족 장애)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oom-app
+  namespace: default
+  labels:
+    app: oom-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: oom-app
+  template:
+    metadata:
+      labels:
+        app: oom-app
+    spec:
+      containers:
+      - name: python-worker
+        image: python:3.9-slim
+        command: ["python", "/scripts/oom.py"]
+        resources:
+          limits:
+            memory: "128Mi"  # 128MB 초과 시 OOMKilled 발생 유도
+        volumeMounts:
+        - name: scripts-vol
+          mountPath: /scripts
+      volumes:
+      - name: scripts-vol
+        configMap:
+          name: test-scripts-config
+
+---
+# 3. Scenario 2: Panic App (코드 버그/로직 장애)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: panic-app
+  namespace: default
+  labels:
+    app: panic-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: panic-app
+  template:
+    metadata:
+      labels:
+        app: panic-app
+    spec:
+      containers:
+      - name: python-worker
+        image: python:3.9-slim
+        command: ["python", "/scripts/panic.py"]
+        volumeMounts:
+        - name: scripts-vol
+          mountPath: /scripts
+      volumes:
+      - name: scripts-vol
+        configMap:
+          name: test-scripts-config
+
+---
+# 4. Scenario 3: Env App (설정/환경변수 누락 장애)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: env-app
+  namespace: default
+  labels:
+    app: env-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: env-app
+  template:
+    metadata:
+      labels:
+        app: env-app
+    spec:
+      containers:
+      - name: python-worker
+        image: python:3.9-slim
+        command: ["python", "/scripts/env_check.py"]
+        # 의도적으로 env 설정을 누락함 (DB_URL 없음)
+        volumeMounts:
+        - name: scripts-vol
+          mountPath: /scripts
+      volumes:
+      - name: scripts-vol
+        configMap:
+          name: test-scripts-config
